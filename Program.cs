@@ -1,16 +1,41 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
 using System.Timers;
-using Microsoft.Toolkit.Parsers;
 using Microsoft.Toolkit.Parsers.Rss;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.Net;
+using System.Net.Mail;
+
 namespace RSSSender
 {
+    class Сriteria
+    {
+        public int PublishDate { get; set; }
+    }
+    class NewsItem 
+    {
+        public string Title { get; set; }
+        public string Content { get; set; }
+        public DateTime PublishDate { get; set; }
+    }
     class Program
     {
-
+        static string[] emails;
+        static Сriteria criteria = new ();
+        static ObservableCollection<NewsItem> news = new();
+        
+        static void News_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
+        {
+            switch(e.Action)
+            {
+                case NotifyCollectionChangedAction.Reset:
+                    Console.WriteLine("Reset");
+                    break;
+            }
+        }
         static async Task<string> GetRSS()
         {
             var client = new HttpClient();
@@ -19,25 +44,10 @@ namespace RSSSender
                 Method = HttpMethod.Get,
                 RequestUri = new Uri("https://news.google.com/rss?topic=h&hl=en-US&gl=US&ceid=US:en"),
             };
-            Console.WriteLine("TEST");
             using (var response = await client.SendAsync(request))
             {
                 response.EnsureSuccessStatusCode();
                 return await Task.Run(() => response.Content.ReadAsStringAsync());
-                // if (body != null)
-                // {
-                    // Console.WriteLine(body.GetType());
-                    // var parser = new RssParser();
-                    // parser.Parse(body)
-                    // foreach (var element in rss)
-                    // {
-                        // Console.WriteLine($"Title: {element.Summary}");
-                        // Console.WriteLine($"Title: {element.Title}");
-                        // Console.WriteLine($"Summary: {element.Summary}");
-                    //     return;
-                    // }
-                // }
-                // Console.WriteLine(body);
             }
         }
         
@@ -45,37 +55,83 @@ namespace RSSSender
         {
             var parser = new RssParser( );
             var result = parser.Parse(rss);
-            foreach (var element in result.Where(a => a.))
+            foreach (var element in result.Where(item => item.PublishDate.Day == criteria.PublishDate))
             {
-                Console.WriteLine($"Title: {element.PublishDate}");
+                Console.WriteLine($"PublishDate: {element.PublishDate.Day}");
+                news.Add(new NewsItem
+                {
+                    Title = element.Title,
+                    PublishDate = element.PublishDate,
+                    Content = element.Content,
+                });
             }
         }
 
-        static void RSSInterval(int num, ElapsedEventHandler method) 
+        static void RSSSender()
+        {
+            foreach (var email in emails)
+            {
+                MailAddress fromMailAddress = new MailAddress("green_arrowalera@mail.ru", "ValeryMailRu");
+                MailAddress toMailAddress = new MailAddress(email, email);
+                using (MailMessage mailMessage = new MailMessage(fromMailAddress, toMailAddress))
+                using (SmtpClient smtpClient = new SmtpClient())
+                {
+                    mailMessage.Subject = "News";
+                    foreach (var newsItem in news)
+                    {
+                        mailMessage.Body += newsItem.Content;   
+                    }
+                    smtpClient.Host = "smtp.mail.ru";
+                    smtpClient.Port = 465;
+                    smtpClient.EnableSsl = true;
+                    smtpClient.DeliveryMethod = SmtpDeliveryMethod.Network;
+                    smtpClient.UseDefaultCredentials = false;
+                    smtpClient.Credentials = new NetworkCredential(fromMailAddress.Address, "");
+                    smtpClient.Timeout = 100;
+                    try
+                    {
+                        smtpClient.Send(mailMessage);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Exception caught in CreateTestMessage2(): {0}",
+                            ex.ToString());
+                    }
+                }   
+            }
+            news.Clear();
+            Console.WriteLine("sent");
+        }
+        static void Interval(int num, ElapsedEventHandler method) 
         {
             var aTimer = new System.Timers.Timer();
             aTimer.Interval = num;
-
-            // Hook up the Elapsed event for the timer. 
+            
             aTimer.Elapsed += method;
-
-            // Have the timer fire repeated events (true is the default)
+            
             aTimer.AutoReset = true;
-
-            // Start the timer
+            
             aTimer.Enabled = true;
         }
         
-        private async static void OnTimedEvent(Object source, System.Timers.ElapsedEventArgs e)
+        private async static void OnGetRSSEvent(Object source, System.Timers.ElapsedEventArgs e)
         {
             Console.WriteLine("The Elapsed event was raised at {0}", e.SignalTime);
             var rss = await GetRSS();
             ParseRSS(rss);
         }
-        
-        static async Task Main(string[] args)
+
+        private async static void OnRSSSenderEvent(Object source, System.Timers.ElapsedEventArgs e)
         {
-            RSSInterval(9000);
+            RSSSender();
+        }
+        static void Main(string[] args)
+        {
+            emails =  new[] {"test@test.com", "test2@test.com"};
+            criteria.PublishDate = 6;
+            news.CollectionChanged += News_CollectionChanged;
+            Interval(9000, OnGetRSSEvent);
+            Interval(10000, OnRSSSenderEvent);
             Console.ReadLine();
         }
     }
